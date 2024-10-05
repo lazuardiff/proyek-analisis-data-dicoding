@@ -1,262 +1,401 @@
+import streamlit as st 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
-from babel.numbers import format_currency
+import datetime as dt
+import matplotlib.image as mpimg
+import urllib
+from datetime import timedelta
 
-sns.set(style='dark')
+# deklarasi fungsi-fungsi
+def convert_to_datetime(data):
+    columns_to_convert = ['order_purchase_timestamp', 'order_approved_at']
+    for column in columns_to_convert:
+        data[column] = pd.to_datetime(data[column])
+    return data
+    
+def top_5_category_product(data):
+    filtered_data = data.groupby('product_category_name_english')[
+    'product_id'].count().reset_index()
 
-# Helper function yang dibutuhkan untuk menyiapkan berbagai dataframe
+    # mengurutkan data berdasarkan banyak data yang terjual
+    filtered_data = filtered_data.sort_values(by='product_id', ascending=False)
 
-def create_daily_orders_df(df):
-    daily_orders_df = df.resample(rule='D', on='order_date').agg({
-        "order_id": "nunique",
-        "total_price": "sum"
-    })
-    daily_orders_df = daily_orders_df.reset_index()
-    daily_orders_df.rename(columns={
-        "order_id": "order_count",
-        "total_price": "revenue"
+    # mengubah nama kolom product_id menjadi total_product
+    filtered_data.rename(columns={'product_id': 'total_product'}, inplace=True)
+    return filtered_data
+
+def total_order_per_month(data):
+    data['year'] = data['order_purchase_timestamp'].dt.year
+    data['month'] = data['order_purchase_timestamp'].dt.month
+
+    filtered_data = data[data['year'].isin([2017, 2018])]
+
+    monthly_data_analysis = filtered_data.groupby(['year', 'month']).agg({
+        'order_id': 'nunique',
+        'payment_value': 'sum'
+    }).reset_index()
+
+    monthly_data_analysis.rename(columns={
+        'order_id': 'total_orders',
+        'payment_value': 'total_payment'
     }, inplace=True)
+
+    month_mapping = {
+        1: 'January',
+        2: 'February',
+        3: 'March',
+        4: 'April',
+        5: 'May',
+        6: 'June',
+        7: 'July',
+        8: 'August',
+        9: 'September',
+        10: 'October',
+        11: 'November',
+        12: 'December'
+    }
+
+    monthly_data_analysis['month'] = monthly_data_analysis['month'].map(
+        month_mapping)
+    return monthly_data_analysis
+
+def review_score(data):
+    filtered_data = data.groupby(
+    'review_score')['order_id'].nunique().reset_index()
+    filtered_data.rename(columns={'order_id': 'total_order'}, inplace=True)
+    return filtered_data
+
+def location_with_the_most_customers(data, customers_data):
+    # Mengelompokkan data berdasarkan prefix kode pos dan menghitung jumlah state unik untuk setiap prefix
+    other_state_geolocation = data.groupby(['geolocation_zip_code_prefix'])['geolocation_state'].nunique().reset_index(name='count')
+
+    other_state_geolocation[other_state_geolocation['count']>= 2].shape
+
+    # Mengelompokkan data berdasarkan prefix kode pos dan state, menghitung jumlahnya, dan menghapus duplikasi berdasarkan prefix kode pos
+    max_state = data.groupby(['geolocation_zip_code_prefix','geolocation_state']).size().reset_index(name='count').drop_duplicates(subset = 'geolocation_zip_code_prefix').drop('count',axis=1)
+
+    geolocation_silver = data.groupby(['geolocation_zip_code_prefix','geolocation_city','geolocation_state'])[['geolocation_lat','geolocation_lng']].median().reset_index()
+    geolocation_silver = geolocation_silver.merge(max_state,on=['geolocation_zip_code_prefix','geolocation_state'],how='inner')
+
+    customers_silver = customers_data.merge(geolocation_silver,left_on='customer_zip_code_prefix',right_on='geolocation_zip_code_prefix',how='inner')
+    customers_silver.drop_duplicates(subset='customer_unique_id')
+
+    return customers_silver
+
+def average_rating_by_delivery_status(data):
+    rating_by_delivery = data.groupby('delivered_on_time')['review_score'].mean().reset_index()
+    rating_by_delivery['delivered_on_time'] = rating_by_delivery['delivered_on_time'].map({True: 'On Time', False: 'Late'})
     
-    return daily_orders_df
+    return rating_by_delivery
 
-def create_sum_order_items_df(df):
-    sum_order_items_df = df.groupby("product_name").quantity_x.sum().sort_values(ascending=False).reset_index()
-    return sum_order_items_df
+def RFM_analysis(data):
+    # Mengelompokkan data berdasarkan customer_unique_id dan menghitung nilai recency, frequency, dan monetary untuk setiap pelanggan
+    rfm_data = data.groupby(by='customer_unique_id', as_index=False).agg({
+    'order_purchase_timestamp': 'max',
+    'order_id': 'nunique',
+    'payment_value': 'sum'
+})
 
-def create_bygender_df(df):
-    bygender_df = df.groupby(by="gender").customer_id.nunique().reset_index()
-    bygender_df.rename(columns={
-        "customer_id": "customer_count"
+# mengubah nama kolom
+    rfm_data.columns = ['customer_unique_id',
+                        'max_order_timestamp', 'frequency', 'monetary']
+
+    # menghitung recency
+    rfm_data['max_order_timestamp'] = rfm_data['max_order_timestamp'].dt.date
+    recent_date = data['order_purchase_timestamp'].dt.date.max()
+
+    def calculate_recency(order_date):
+        return (recent_date - order_date).days
+
+    rfm_data['recency'] = rfm_data['max_order_timestamp'].apply(calculate_recency)
+    rfm_data.drop('max_order_timestamp', axis=1, inplace=True)
+    rfm_data.head()
+
+        # menghitung recency
+    recent_date = data['order_purchase_timestamp'].max() + timedelta(days=1)
+
+    # mengelompokkan data berdasarkan customer_unique_id dan menghitung nilai recency, frequency, dan monetary untuk setiap pelanggan
+    rfm_data = data.groupby(by='customer_unique_id').agg({
+        'order_purchase_timestamp': lambda x: (recent_date - x.max()).days,
+        'order_id': 'nunique',
+        'payment_value': 'sum'
+    }).reset_index()
+
+    # mengubah nama kolom
+    rfm_data.rename(columns={
+        'order_purchase_timestamp': 'recency',
+        'order_id': 'frequency',
+        'payment_value': 'monetary'
     }, inplace=True)
-    
-    return bygender_df
 
-def create_byage_df(df):
-    byage_df = df.groupby(by="age_group").customer_id.nunique().reset_index()
-    byage_df.rename(columns={
-        "customer_id": "customer_count"
-    }, inplace=True)
-    byage_df['age_group'] = pd.Categorical(byage_df['age_group'], ["Youth", "Adults", "Seniors"])
-    
-    return byage_df
+    # memberikan skor R, F, dan M dari 1 hingga 5 berdasarkan kuantiles
+    rfm_data['R_Score'] = pd.qcut(rfm_data['recency'], 5, labels=[
+                                  5, 4, 3, 2, 1]).astype(int)
+    rfm_data['F_Score'] = pd.qcut(rfm_data['frequency'].rank(
+        method='first'), 5, labels=[1, 2, 3, 4, 5]).astype(int)
+    rfm_data['M_Score'] = pd.qcut(rfm_data['monetary'], 5, labels=[
+                                  1, 2, 3, 4, 5]).astype(int)
 
-def create_bystate_df(df):
-    bystate_df = df.groupby(by="state").customer_id.nunique().reset_index()
-    bystate_df.rename(columns={
-        "customer_id": "customer_count"
-    }, inplace=True)
-    
-    return bystate_df
+    rfm_data['RFM_Score'] = rfm_data['R_Score'].map(
+        str) + rfm_data['F_Score'].map(str) + rfm_data['M_Score'].map(str)
 
-def create_rfm_df(df):
-    rfm_df = df.groupby(by="customer_id", as_index=False).agg({
-        "order_date": "max", #mengambil tanggal order terakhir
-        "order_id": "nunique",
-        "total_price": "sum"
-    })
-    rfm_df.columns = ["customer_id", "max_order_timestamp", "frequency", "monetary"]
-    
-    rfm_df["max_order_timestamp"] = rfm_df["max_order_timestamp"].dt.date
-    recent_date = df["order_date"].dt.date.max()
-    rfm_df["recency"] = rfm_df["max_order_timestamp"].apply(lambda x: (recent_date - x).days)
-    rfm_df.drop("max_order_timestamp", axis=1, inplace=True)
-    
-    return rfm_df
+    # fungsi segmentasi customer berdasarkan RFM Score
+    def segment(x):
+        if x['R_Score'] >= 4 and x['F_Score'] >= 4 and x['M_Score'] >= 4:
+            return 'Best Customers'
+        elif x['R_Score'] >= 4 and x['F_Score'] <= 2:
+            return 'New Customers'
+        elif x['R_Score'] >= 3 and x['F_Score'] >= 3 and x['M_Score'] >= 3:
+            return 'Loyal Customers'
+        else:
+            return 'Others'
 
-# Load cleaned data
-all_df = pd.read_csv("all_data.csv")
+    rfm_data['Segment'] = rfm_data.apply(segment, axis=1)
 
-datetime_columns = ["order_date", "delivery_date"]
-all_df.sort_values(by="order_date", inplace=True)
-all_df.reset_index(inplace=True)
+    return rfm_data
 
-for column in datetime_columns:
-    all_df[column] = pd.to_datetime(all_df[column])
+# inisialisasi tampilan awal
+st.set_page_config(
+    page_title="Proyek Dicoding",
+    page_icon="submission/gambar/lambang-its-png-v1.png",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+    menu_items={
+        'about': 'Website ini digunakan sebagai pemenuhan tugas akhir untuk course Belajar Data Analisis dengan Python di Dicoding.'
+    }
+)
 
-# Filter data
-min_date = all_df["order_date"].min()
-max_date = all_df["order_date"].max()
+# load data
+all_df = pd.read_csv('./submission/dashboard/merge_all.csv')
+customer_data=pd.read_csv('./submission/data/customers_dataset.csv')
+geolocation_data = pd.read_csv('./submission/data/geolocation_dataset.csv')
+all_df = convert_to_datetime(all_df)
+
+# assign data to variable
+total_order_per_months = total_order_per_month(all_df)
+top_5_category_products = top_5_category_product(all_df)
+order_by_review_score = review_score(all_df)
+customer_location = location_with_the_most_customers(geolocation_data, customer_data)
+rating_by_delivery = average_rating_by_delivery_status(all_df)
+rfm_data = RFM_analysis(all_df)
+
+st.title('Proyek Belajar Analisis Data dengan Python')
+st.text('Menggunakan data Brazilian E-Commerce Public Dataset')
+st.logo('submission/gambar/Logo-its-biru-transparan.png', size="large")
+
 
 with st.sidebar:
-    # Menambahkan logo perusahaan
-    st.image("https://github.com/dicodingacademy/assets/raw/main/logo.png")
-    
-    # Mengambil start_date & end_date dari date_input
-    start_date, end_date = st.date_input(
-        label='Rentang Waktu',min_value=min_date,
-        max_value=max_date,
-        value=[min_date, max_date]
-    )
+    st.markdown('Perkenalkan, Saya Lazuardi Favian Fazari, mahasiswa Teknik Elektro ITS semester 7. Salam kenal.')
+    st.markdown('LinkedIn: [Lazuardi Fazari](https://www.linkedin.com/in/lazuardi-fazari/)')
+    st.markdown('Instagram: [@lazuardiii_ff](https://www.instagram.com/lazuardiii_ff/)')
+    #st.markdown('Website ini digunakan sebagai pemenuhan tugas akhir untuk course Belajar Data Analisis dengan Python di Dicoding.')
+    st.markdown('Dataset yang digunakan adalah Brazilian E-Commerce Public Dataset yang dapat diakses melalui Kaggle. [Kaggle Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)')
 
-main_df = all_df[(all_df["order_date"] >= str(start_date)) & 
-                (all_df["order_date"] <= str(end_date))]
-
-# st.dataframe(main_df)
-
-# # Menyiapkan berbagai dataframe
-daily_orders_df = create_daily_orders_df(main_df)
-sum_order_items_df = create_sum_order_items_df(main_df)
-bygender_df = create_bygender_df(main_df)
-byage_df = create_byage_df(main_df)
-bystate_df = create_bystate_df(main_df)
-rfm_df = create_rfm_df(main_df)
-
-
-# plot number of daily orders (2021)
-st.header('Dicoding Collection Dashboard :sparkles:')
-st.subheader('Daily Orders')
-
-col1, col2 = st.columns(2)
-
-with col1:
-    total_orders = daily_orders_df.order_count.sum()
-    st.metric("Total orders", value=total_orders)
-
-with col2:
-    total_revenue = format_currency(daily_orders_df.revenue.sum(), "AUD", locale='es_CO') 
-    st.metric("Total Revenue", value=total_revenue)
-
-fig, ax = plt.subplots(figsize=(16, 8))
-ax.plot(
-    daily_orders_df["order_date"],
-    daily_orders_df["order_count"],
-    marker='o', 
-    linewidth=2,
-    color="#90CAF9"
+st.markdown(
+    '<h2 style="text-align: center; color: #FFFFFF;">Data Visualization untuk menjawab pertanyaan bisnis</h2>',
+    unsafe_allow_html=True
 )
-ax.tick_params(axis='y', labelsize=20)
-ax.tick_params(axis='x', labelsize=15)
+st.markdown('Pertanyaan bisnis yang saya ajukan adalah:  \n1. Kategori produk apa yang paling banyak dan paling sedikit terjual?  \n2. Bagaimana tren penjualan berdasarkan waktu?  \n3. Bagaimana skor review mempengaruhi penjualan?  \n4. Dimanakah lokasi yang memiliki pelanggan terbanyak?  \n5. Apakah pengiriman tepat waktu dapat mempengaruhi review score produk?')
 
-st.pyplot(fig)
+# inisialisasi tabs
+tab1, tab2, tab3, tab4, tab5, tab6=st.tabs(['Pertanyaan 1', 'Pertanyaan 2', 'Pertanyaan 3', 'Pertanyaan 4', 'Pertanyaan 5', 'RFM Analysis'])
 
+with tab1:
+    # visualisasi data pertanyaan 1
+    with st.container():
+        st.markdown(
+            '<h3 style="text-align: center; color: #FFFFFF;">Top 5 Kategori Produk Paling Banyak dan Paling Sedikit Terjual</h3>',
+            unsafe_allow_html=True
+        )
+        st.markdown('1. Kategori produk apa yang paling banyak dan paling sedikit terjual?')
+        
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(20, 6))
+        colors = ['#254E7A', '#CBE3EF', '#CBE3EF', '#CBE3EF', '#CBE3EF']
+    
+        sns.barplot(x='total_product', y='product_category_name_english', data=top_5_category_products.head(
+            5), hue='product_category_name_english', palette=colors, ax=ax[0])
+        ax[0].set_title('Top 5 Kategori Produk Paling Banyak Terjual',
+                        loc='center', fontsize=16, fontweight='bold')
+        ax[0].set_xlabel('Total Produk', fontsize=12)
+        ax[0].set_ylabel('Kategori Produk', fontsize=12)
+        ax[0].tick_params(axis='y', labelsize=12)
+        ax[0].tick_params(axis='x', labelsize=12)
+    
+        sns.barplot(x='total_product', y='product_category_name_english', data=top_5_category_products.sort_values(
+            by='total_product', ascending=True).head(5), hue='product_category_name_english', palette=colors, ax=ax[1])
+        ax[1].set_title('Top 5 Kategori Produk Paling Sedikit Terjual',
+                        loc='center', fontsize=16, fontweight='bold')
+        ax[1].set_xlabel('Total Produk', fontsize=12)
+        ax[1].set_ylabel('Kategori Produk', fontsize=12)
+        ax[1].invert_xaxis()
+        ax[1].yaxis.set_label_position("right")
+        ax[1].yaxis.tick_right()
+        ax[1].tick_params(axis='y', labelsize=12)
+        ax[1].tick_params(axis='x', labelsize=12)
+    
+        plt.tight_layout()
+        st.pyplot(fig)
+    
+        with st.expander('Hasil Analisis Data'):
+            st.write('pada gambar di atas, dapat diketahui bahwa kategori produk yang paling banyak terjual adalah "bed_bath_table" dengan penjualan sekitar 12000 dan yang paling sedikit terjual adalah "security_and_services" dengan penjualan sekitar < 5 ')
+            st.write('Data yang digunakan adalah:', top_5_category_products)
 
-# Product performance
-st.subheader("Best & Worst Performing Product")
+with tab2:
+    # visualisasi data pertanyaan 2
+    with st.container():
+        st.markdown(
+            '<h3 style="text-align: center; color: #FFFFFF;">Jumlah Order per-Bulan</h3>',
+            unsafe_allow_html=True
+        )
+        st.markdown('2. Bagaimana tren penjualan berdasarkan waktu?')
 
-fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(35, 15))
+        fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(14, 10))
+        sns.lineplot(data=total_order_per_months[total_order_per_months['year'] == 2017], x='month', y='total_orders', marker='o', ax=ax[0], color='#254E7A')
+        ax[0].set_title('Jumlah Order per-Bulan Tahun 2017', loc='center', fontsize=16, fontweight='bold')
+        ax[0].set_xlabel('Bulan', fontsize=12)
+        ax[0].set_ylabel('Jumlah Order', fontsize=12)
+        ax[0].tick_params(axis='y', labelsize=12)
+        ax[0].tick_params(axis='x', labelsize=12)
+        ax[0].grid(True)
 
-colors = ["#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
+        sns.lineplot(data=total_order_per_months[total_order_per_months['year'] == 2018], x='month', y='total_orders', marker='o', ax=ax[1], color='#254E7A')
+        ax[1].set_title('Jumlah Order per-Bulan Tahun 2018', loc='center', fontsize=16, fontweight='bold')
+        ax[1].set_xlabel('Bulan', fontsize=12)
+        ax[1].set_ylabel('Jumlah Order', fontsize=12)
+        ax[1].tick_params(axis='y', labelsize=12)
+        ax[1].tick_params(axis='x', labelsize=12)
+        ax[1].grid(True)
 
-sns.barplot(x="quantity_x", y="product_name", data=sum_order_items_df.head(5), palette=colors, ax=ax[0])
-ax[0].set_ylabel(None)
-ax[0].set_xlabel("Number of Sales", fontsize=30)
-ax[0].set_title("Best Performing Product", loc="center", fontsize=50)
-ax[0].tick_params(axis='y', labelsize=35)
-ax[0].tick_params(axis='x', labelsize=30)
+        plt.tight_layout()
+        st.pyplot(fig)
 
-sns.barplot(x="quantity_x", y="product_name", data=sum_order_items_df.sort_values(by="quantity_x", ascending=True).head(5), palette=colors, ax=ax[1])
-ax[1].set_ylabel(None)
-ax[1].set_xlabel("Number of Sales", fontsize=30)
-ax[1].invert_xaxis()
-ax[1].yaxis.set_label_position("right")
-ax[1].yaxis.tick_right()
-ax[1].set_title("Worst Performing Product", loc="center", fontsize=50)
-ax[1].tick_params(axis='y', labelsize=35)
-ax[1].tick_params(axis='x', labelsize=30)
+        with st.expander('Hasil Analisis Data'):
+            st.write('dari data yang telah divisualisasikan, jumlah order pada tahun 2017 meningkat pesat dari Januari 2017 hingga Desember 2017. sayangnya, pada Desember 2017 hingga Oktober 2018, jumlah order terus mengalami penurunan yang signifikan.')
+            st.write('Data yang digunakan adalah:', total_order_per_months)
 
-st.pyplot(fig)
+with tab3:
+    with st.container():
+        st.markdown(
+            '<h3 style="text-align: center; color: #FFFFFF;">Jumlah Order berdasarkan Skor Review</h3>',
+            unsafe_allow_html=True
+        )
+        st.markdown('3. Bagaimana skor review mempengaruhi penjualan?')
 
-# customer demographic
-st.subheader("Customer Demographics")
+        fig = plt.figure(figsize=(14, 8))
+        sns.barplot(data=order_by_review_score, x='review_score',
+                    y='total_order', palette='viridis')
+        plt.title('Order berdasarkan Skor Review', fontsize=16, fontweight='bold')
+        plt.xlabel('Score Review', fontsize=12)
+        plt.ylabel('Jumlah Order', fontsize=12)
+        plt.grid(axis='y', linestyle='--')
 
-col1, col2 = st.columns(2)
+        st.pyplot(fig)
 
-with col1:
-    fig, ax = plt.subplots(figsize=(20, 10))
+        with st.expander('Hasil Analisis Data'):
+            st.write('berdasarkan data yang sudah divisualisasikan, mayoritas order memiliki skor review tinggi, dengan skor 5.0 mendominasi lebih dari 50.000 order, menunjukkan tingkat kepuasan pelanggan yang sangat tinggi.')
+            st.write('Data yang digunakan adalah:', order_by_review_score)
+    
+with tab4:
+    with st.container():
+        st.markdown(
+            '<h3 style="text-align: center; color: #FFFFFF;">Lokasi dengan Pelanggan Terbanyak</h3>',
+            unsafe_allow_html=True
+        )
+        st.markdown('4. Dimanakah lokasi yang memiliki pelanggan terbanyak?')
 
-    sns.barplot(
-        y="customer_count", 
-        x="gender",
-        data=bygender_df.sort_values(by="customer_count", ascending=False),
-        palette=colors,
-        ax=ax
+        brazil = mpimg.imread(urllib.request.urlopen('https://i.pinimg.com/originals/3a/0c/e1/3a0ce18b3c842748c255bc0aa445ad41.jpg'),'jpg')
+        fig, ax=plt.subplots(figsize=(10,10))
+        ax.scatter(customer_location['geolocation_lng'], customer_location['geolocation_lat'], alpha=0.3, s=0.3, c='maroon')
+        plt.axis('off')
+        plt.imshow(brazil, extent=[-73.98283055, -33.8,-33.75116944,5.4])
+        #for _, row in customer_location.iterrows():
+        #    ax.text(row['geolocation_lng'], row['geolocation_lat'], row['geolocation_city'], fontsize=6, color='black', alpha=0.6)
+        st.pyplot(fig)
+
+        with st.expander('Hasil Analisis Data'):
+            st.write('berdasarkan data yang sudah divisualisasikan, pelanggan terbanyak berada di wilayah tenggara Brazil, dengan kota Sao Paulo sebagai kota dengan pelanggan terbanyak.')
+            st.write('Data yang digunakan adalah:', customer_location)
+
+with tab5:
+    with st.container():
+        st.markdown(
+            '<h3 style="text-align: center; color: #FFFFFF;">Rata-rata Rating Berdasarkan Status Pengiriman</h3>',
+            unsafe_allow_html=True
+        )
+        st.markdown('5. Apakah pengiriman tepat waktu dapat mempengaruhi review score produk?')
+
+        fig=plt.figure(figsize=(12, 6))
+        sns.barplot(data=rating_by_delivery, x='delivered_on_time', y='review_score', palette='viridis')
+        plt.title('Rata-rata Rating Berdasarkan Status Pengiriman', fontsize=16, fontweight='bold')
+        plt.xlabel('Status Pengiriman', fontsize=12)
+        plt.ylabel('Rata-rata Rating', fontsize=12)
+        plt.ylim(0, 5)
+        plt.grid(axis='y', linestyle='--')
+        plt.tight_layout()
+        
+        st.pyplot(fig)
+
+        with st.expander('Hasil Analisis Data'):
+            st.write('berdasarkan data yang sudah divisualisasikan, pengiriman tepat waktu memiliki rata-rata rating yang lebih tinggi dibandingkan pengiriman yang terlambat.')
+            st.write('Data yang digunakan adalah:', rating_by_delivery)
+
+with tab6:
+    st.markdown(
+        '<h3 style="text-align: center; color: #FFFFFF;">RFM Analysis</h3>',
+        unsafe_allow_html=True
     )
-    ax.set_title("Number of Customer by Gender", loc="center", fontsize=50)
-    ax.set_ylabel(None)
-    ax.set_xlabel(None)
-    ax.tick_params(axis='x', labelsize=35)
-    ax.tick_params(axis='y', labelsize=30)
+    st.markdown('RFM Analysis adalah metode analisis yang digunakan untuk mengelompokkan pelanggan berdasarkan tiga faktor: Recency, Frequency, dan Monetary. Recency adalah jarak waktu antara transaksi terakhir pelanggan dengan waktu saat ini, Frequency adalah jumlah transaksi yang dilakukan oleh pelanggan, dan Monetary adalah total uang yang dihabiskan oleh pelanggan. Dengan metode ini, kita dapat mengetahui pelanggan mana yang paling berharga dan pelanggan mana yang perlu ditingkatkan.')
+
+    col1, col2, col3 = st.columns(3, vertical_alignment='center', gap='small')
+    with col1:
+        st.markdown('<h4 style="text-align: center; color: #FFFFFF; font-size:20px;">Recency</h4>', unsafe_allow_html=True)
+        fig=plt.figure(figsize=(10, 6))
+        sns.histplot(rfm_data['recency'], bins=30, kde=False, color='blue')
+        plt.title('Distribusi Recency')
+        plt.xlabel('Recency (hari)')
+        plt.ylabel('Jumlah Pelanggan')
+        st.pyplot(fig)
+
+    with col2:
+        st.markdown('<h4 style="text-align: center; color: #FFFFFF; font-size:20px;">Frequency</h4>', unsafe_allow_html=True)
+        fig=plt.figure(figsize=(10, 6))
+        sns.histplot(rfm_data['frequency'], bins=30, kde=False, color='green')
+        plt.title('Distribusi Frequency')
+        plt.xlabel('Frequency (transaksi)')
+        plt.ylabel('Jumlah Pelanggan')
+        st.pyplot(fig)
+
+    with col3:
+        st.markdown('<h4 style="text-align: center; color: #FFFFFF; font-size:20px;">Monetary</h4>', unsafe_allow_html=True)
+        fig=plt.figure(figsize=(10, 6))
+        sns.histplot(rfm_data['monetary'], bins=30, kde=False, color='red')
+        plt.title('Distribusi Monetary')
+        plt.xlabel('Monetary (total pembelian)')
+        plt.ylabel('Jumlah Pelanggan')
+        st.pyplot(fig)
+    
+    segment_counts = rfm_data['Segment'].value_counts()
+
+    fig=plt.figure(figsize=(8, 8))
+    plt.pie(segment_counts.values, labels=segment_counts.index,
+            autopct='%1.1f%%', startangle=140)
+    plt.title('Distribusi Segmen Customer')
+    plt.axis('equal')
     st.pyplot(fig)
 
-with col2:
-    fig, ax = plt.subplots(figsize=(20, 10))
-    
-    colors = ["#D3D3D3", "#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
+    with st.expander('Hasil Analisis Data'):
+        st.write("""
+                **Kesimpulan RFM Analysis:**
 
-    sns.barplot(
-        y="customer_count", 
-        x="age_group",
-        data=byage_df.sort_values(by="age_group", ascending=False),
-        palette=colors,
-        ax=ax
-    )
-    ax.set_title("Number of Customer by Age", loc="center", fontsize=50)
-    ax.set_ylabel(None)
-    ax.set_xlabel(None)
-    ax.tick_params(axis='x', labelsize=35)
-    ax.tick_params(axis='y', labelsize=30)
-    st.pyplot(fig)
-
-fig, ax = plt.subplots(figsize=(20, 10))
-colors = ["#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
-sns.barplot(
-    x="customer_count", 
-    y="state",
-    data=bystate_df.sort_values(by="customer_count", ascending=False),
-    palette=colors,
-    ax=ax
-)
-ax.set_title("Number of Customer by States", loc="center", fontsize=30)
-ax.set_ylabel(None)
-ax.set_xlabel(None)
-ax.tick_params(axis='y', labelsize=20)
-ax.tick_params(axis='x', labelsize=15)
-st.pyplot(fig)
-
-
-# Best Customer Based on RFM Parameters
-st.subheader("Best Customer Based on RFM Parameters")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    avg_recency = round(rfm_df.recency.mean(), 1)
-    st.metric("Average Recency (days)", value=avg_recency)
-
-with col2:
-    avg_frequency = round(rfm_df.frequency.mean(), 2)
-    st.metric("Average Frequency", value=avg_frequency)
-
-with col3:
-    avg_frequency = format_currency(rfm_df.monetary.mean(), "AUD", locale='es_CO') 
-    st.metric("Average Monetary", value=avg_frequency)
-
-fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(35, 15))
-colors = ["#90CAF9", "#90CAF9", "#90CAF9", "#90CAF9", "#90CAF9"]
-
-sns.barplot(y="recency", x="customer_id", data=rfm_df.sort_values(by="recency", ascending=True).head(5), palette=colors, ax=ax[0])
-ax[0].set_ylabel(None)
-ax[0].set_xlabel("customer_id", fontsize=30)
-ax[0].set_title("By Recency (days)", loc="center", fontsize=50)
-ax[0].tick_params(axis='y', labelsize=30)
-ax[0].tick_params(axis='x', labelsize=35)
-
-sns.barplot(y="frequency", x="customer_id", data=rfm_df.sort_values(by="frequency", ascending=False).head(5), palette=colors, ax=ax[1])
-ax[1].set_ylabel(None)
-ax[1].set_xlabel("customer_id", fontsize=30)
-ax[1].set_title("By Frequency", loc="center", fontsize=50)
-ax[1].tick_params(axis='y', labelsize=30)
-ax[1].tick_params(axis='x', labelsize=35)
-
-sns.barplot(y="monetary", x="customer_id", data=rfm_df.sort_values(by="monetary", ascending=False).head(5), palette=colors, ax=ax[2])
-ax[2].set_ylabel(None)
-ax[2].set_xlabel("customer_id", fontsize=30)
-ax[2].set_title("By Monetary", loc="center", fontsize=50)
-ax[2].tick_params(axis='y', labelsize=30)
-ax[2].tick_params(axis='x', labelsize=35)
-
-st.pyplot(fig)
-
-st.caption('Copyright © Dicoding 2023')
+                - **Recency**: Mayoritas customer melakukan pembelian terakhir antara 100-400 hari lalu.
+                - **Frequency**: Sebagian besar customer hanya melakukan 1-2 transaksi.
+                - **Monetary**: Nilai pembelian rata-rata pelanggan cenderung rendah.
+                - **Segmentasi Customer**:
+                    - **Best Customer**: Customer yang perlu dipertahankan.
+                    - **New Customer**: Customer baru dengan recency tinggi tetapi frekuensi rendah.
+                    - **Loyal Customer**: Customer yang sering bertransaksi.
+                    - **Others**: Customer dengan skor RFM rendah.
+                """)
+        st.write('Data yang digunakan adalah:', rfm_data)
