@@ -1,1 +1,1 @@
-https://share.streamlit.io/
+https://lazuardifazari.streamlit.app/
