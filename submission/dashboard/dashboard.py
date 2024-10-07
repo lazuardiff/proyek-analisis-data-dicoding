@@ -159,7 +159,7 @@ def RFM_analysis(data):
 # inisialisasi tampilan awal
 st.set_page_config(
     page_title="Proyek Dicoding",
-    page_icon="gambar/lambang-its-png-v1.png",
+    page_icon="../gambar/lambang-its-png-v1.png",
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={
@@ -168,9 +168,9 @@ st.set_page_config(
 )
 
 # load data
-all_df = pd.read_csv('dashboard/merge_all.csv')
-customer_data=pd.read_csv("data/customers_dataset.csv")
-geolocation_data = pd.read_csv("data/geolocation_dataset.csv")
+all_df = pd.read_csv('merge_all.csv')
+customer_data=pd.read_csv("../data/customers_dataset.csv")
+geolocation_data = pd.read_csv("../data/geolocation_dataset.csv")
 all_df = convert_to_datetime(all_df)
 
 # assign data to variable
@@ -183,7 +183,7 @@ rfm_data = RFM_analysis(all_df)
 
 st.title('Proyek Belajar Analisis Data dengan Python')
 st.text('Menggunakan data Brazilian E-Commerce Public Dataset')
-st.logo('gambar/Logo-its-biru-transparan.png', size="large")
+st.logo('../gambar/Logo-its-biru-transparan.png', size="large")
 
 
 with st.sidebar:
@@ -200,7 +200,7 @@ st.markdown(
 st.markdown('Pertanyaan bisnis yang saya ajukan adalah:  \n1. Kategori produk apa yang paling banyak dan paling sedikit terjual?  \n2. Bagaimana tren penjualan berdasarkan waktu?  \n3. Bagaimana skor review mempengaruhi penjualan?  \n4. Dimanakah lokasi yang memiliki pelanggan terbanyak?  \n5. Apakah pengiriman tepat waktu dapat mempengaruhi review score produk?')
 
 # inisialisasi tabs
-tab1, tab2, tab3, tab4, tab5, tab6=st.tabs(['Pertanyaan 1', 'Pertanyaan 2', 'Pertanyaan 3', 'Pertanyaan 4', 'Pertanyaan 5', 'RFM Analysis'])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7=st.tabs(['Pertanyaan 1', 'Pertanyaan 2', 'Pertanyaan 3', 'Pertanyaan 4', 'Pertanyaan 5', 'RFM Analysis', 'Kesimpulan'])
 
 with tab1:
     # visualisasi data pertanyaan 1
@@ -399,3 +399,17 @@ with tab6:
                     - **Others**: Customer dengan skor RFM rendah.
                 """)
         st.write('Data yang digunakan adalah:', rfm_data)
+
+with tab7:
+    st.markdown(
+        '<h3 style="text-align: center; color: #FFFFFF;">Kesimpulan</h3>',
+        unsafe_allow_html=True
+    )
+    st.markdown('Dari hasil analisis data yang telah dilakukan, dapat disimpulkan bahwa:')
+    st.markdown('1. Kategori produk yang paling banyak terjual adalah "bed_bath_table" dengan penjualan sekitar 12000 dan yang paling sedikit terjual adalah "security_and_services" dengan penjualan sekitar < 5.')
+    st.markdown('2. Jumlah order pada tahun 2017 meningkat pesat dari Januari 2017 hingga Desember 2017. sayangnya, pada Desember 2017 hingga Oktober 2018, jumlah order terus mengalami penurunan yang signifikan.')
+    st.markdown('3. Mayoritas order memiliki skor review tinggi, dengan skor 5.0 mendominasi lebih dari 50.000 order, menunjukkan tingkat kepuasan pelanggan yang sangat tinggi.')
+    st.markdown('4. Pelanggan terbanyak berada di wilayah tenggara Brazil, dengan kota Sao Paulo sebagai kota dengan pelanggan terbanyak.')
+    st.markdown('5. Pengiriman tepat waktu memiliki rata-rata rating yang lebih tinggi dibandingkan pengiriman yang terlambat.')
+    st.markdown('6. Berdasarkan RFM Analysis, mayoritas customer melakukan pembelian terakhir antara 100-400 hari lalu, sebagian besar customer hanya melakukan 1-2 transaksi, dan nilai pembelian rata-rata pelanggan cenderung rendah.')
+    st.markdown('7. Segmentasi customer terdiri dari Best Customer, New Customer, Loyal Customer, dan Others.')
