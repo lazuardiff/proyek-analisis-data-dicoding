@@ -159,7 +159,7 @@ def RFM_analysis(data):
 # inisialisasi tampilan awal
 st.set_page_config(
     page_title="Proyek Dicoding",
-    page_icon="../gambar/lambang-its-png-v1.png",
+    page_icon="gambar/lambang-its-png-v1.png",
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={
@@ -168,9 +168,9 @@ st.set_page_config(
 )
 
 # load data
-all_df = pd.read_csv('merge_all.csv')
-customer_data=pd.read_csv("../data/customers_dataset.csv")
-geolocation_data = pd.read_csv("../data/geolocation_dataset.csv")
+all_df = pd.read_csv('dashboard/merge_all.csv')
+customer_data=pd.read_csv("data/customers_dataset.csv")
+geolocation_data = pd.read_csv("data/geolocation_dataset.csv")
 all_df = convert_to_datetime(all_df)
 
 # assign data to variable
@@ -183,7 +183,7 @@ rfm_data = RFM_analysis(all_df)
 
 st.title('Proyek Belajar Analisis Data dengan Python')
 st.text('Menggunakan data Brazilian E-Commerce Public Dataset')
-st.logo('../gambar/Logo-its-biru-transparan.png', size="large")
+st.logo('gambar/Logo-its-biru-transparan.png', size="large")
 
 
 with st.sidebar:
